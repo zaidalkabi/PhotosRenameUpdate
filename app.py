@@ -124,7 +124,7 @@ with st.sidebar:
     st.info("💡 Safe State Engine is active to prevent multi-file drop crashes.")
 
 # --- Main Interface ---
-st.title("🏷️ Smart Image Renamer Pro")
+st.title("🏷️ Image Renamer ")
 st.caption("Upload multiple project images. AI will instantly scan codes, rename, and pack them into a ZIP file.")
 
 uploaded_files = st.file_uploader(
