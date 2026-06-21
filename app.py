@@ -5,8 +5,6 @@ import numpy as np
 import zipfile
 import os
 import re
-from PIL import Image
-from concurrent.futures import ThreadPoolExecutor
 
 # Page Configuration
 st.set_page_config(
@@ -16,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Professional Dark/Modern UI
+# Custom CSS for Professional UI
 st.markdown("""
     <style>
     .main { background-color: #fcfcfd; }
@@ -42,113 +40,124 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Cache OCR Reader to prevent reloading
+# Safe Local Directory for OCR Models
+MODEL_DIR = os.path.join(os.getcwd(), "ocr_models")
+if not os.path.exists(MODEL_DIR):
+    os.makedirs(MODEL_DIR)
+
+# Cache OCR Reader Safely
 @st.cache_resource
 def load_ocr_reader():
-    return easyocr.Reader(['en'], model_storage_directory='/tmp', gpu=False)
+    return easyocr.Reader(['en'], model_storage_directory=MODEL_DIR, gpu=False)
 
-reader = load_ocr_reader()
+try:
+    reader = load_ocr_reader()
+except Exception as e:
+    st.error(f"Failed to initialize OCR engine: {e}")
 
-# Worker function for Fast Parallel Processing
+# Stable Image Processing function
 def process_single_image(file, pattern_type):
-    # Read file bytes
-    file_bytes = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    
-    # Speed Optimization: Resize a temporary copy for OCR if it's too large
-    h, w = img.shape[:2]
-    if max(h, w) > 1200:
-        scale = 1200 / max(h, w)
-        img_for_ocr = cv2.resize(img, (int(w * scale), int(h * scale)))
-    else:
-        img_for_ocr = img
-
-    # Run OCR
-    results = reader.readtext(img_for_ocr)
-    
-    detected_name = None
-    for (bbox, text, prob) in results:
-        clean_text = text.strip()
+    try:
+        file_bytes = np.frombuffer(file.read(), np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+            
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        if pattern_type == "Starts with CA (e.g., ca5_3)":
-            if re.search(r'(?i)ca[\d_\-]+', clean_text):
-                detected_name = clean_text
-                break
-        elif pattern_type == "Any text containing numbers":
-            if re.search(r'[A-Za-z]+.*\d+|\d+.*[A-Za-z]+', clean_text):
-                detected_name = clean_text
-                break
+        # Optimize image size for fast OCR
+        h, w = img.shape[:2]
+        if max(h, w) > 1000:
+            scale = 1000 / max(h, w)
+            img_for_ocr = cv2.resize(img, (int(w * scale), int(h * scale)))
         else:
-            if len(clean_text) > 2:
-                detected_name = clean_text
-                break
-                
-    status = "✅ Text detected successfully!" if detected_name else "⚠️ No text matched - Kept original name"
-    
-    if not detected_name:
-        detected_name = os.path.splitext(file.name)[0]
+            img_for_ocr = img
+
+        results = reader.readtext(img_for_ocr)
         
-    # Clean file name from illegal characters
-    detected_name = re.sub(r'[\\/*?:"<>| ]', "_", detected_name)
-    ext = os.path.splitext(file.name)[1].lower()
-    
-    return {
-        "original_name": file.name,
-        "suggested_name": detected_name,
-        "extension": ext,
-        "image_data": img_rgb,
-        "bytes": file_bytes,
-        "status": status
-    }
+        detected_name = None
+        for (bbox, text, prob) in results:
+            clean_text = text.strip()
+            
+            if pattern_type == "Starts with CA (e.g., ca5_3)":
+                if re.search(r'(?i)ca[\d_\-]+', clean_text):
+                    detected_name = clean_text
+                    break
+            elif pattern_type == "Any text containing numbers":
+                if re.search(r'[A-Za-z]+.*\d+|\d+.*[A-Za-z]+', clean_text):
+                    detected_name = clean_text
+                    break
+            else:
+                if len(clean_text) > 2:
+                    detected_name = clean_text
+                    break
+                    
+        status = "✅ Text detected successfully!" if detected_name else "⚠️ No text matched - Kept original name"
+        
+        if not detected_name:
+            detected_name = os.path.splitext(file.name)[0]
+            
+        detected_name = re.sub(r'[\\/*?:"<>| ]', "_", detected_name)
+        ext = os.path.splitext(file.name)[1].lower()
+        
+        return {
+            "original_name": file.name,
+            "suggested_name": detected_name,
+            "extension": ext,
+            "image_data": img_rgb,
+            "bytes": file_bytes,
+            "status": status
+        }
+    except Exception as e:
+        return None
 
 # --- Sidebar Control Panel ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/1086/1086741.png", width=80)
     st.title("⚙️ Control Panel")
-    st.write("Optimize your extraction rules:")
     
     pattern_type = st.selectbox(
         "Target Text Pattern:",
         ["Starts with CA (e.g., ca5_3)", "Any text containing numbers", "Extract any text found"]
     )
-    
     st.markdown("---")
-    st.success("⚡ **Turbo Mode Active:** Images are processed in parallel for maximum speed.")
+    st.info("💡 Safe State Engine is active to prevent multi-file drop crashes.")
 
 # --- Main Interface ---
 st.title("🏷️ Smart Image Renamer Pro")
-st.caption("Upload your project/site images. AI will instantly scan codes, rename, and pack them into a ZIP file.")
+st.caption("Upload multiple project images. AI will instantly scan codes, rename, and pack them into a ZIP file.")
 
 uploaded_files = st.file_uploader(
     "Drag and drop your images here (Supports JPG, PNG)", 
     accept_multiple_files=True, 
-    type=['jpg', 'jpeg', 'png']
+    type=['jpg', 'jpeg', 'png'],
+    key="file_uploader"
 )
 
+# Initialize Session States to prevent reload crashes
+if "processed_data" Hollywood not in st.session_state or st.session_state.get("last_uploaded_count") != len(uploaded_files or []):
+    st.session_state["processed_data"] = []
+    st.session_state["last_uploaded_count"] = len(uploaded_files or [])
+    st.session_state["user_edits"] = {}
+
 if uploaded_files:
-    st.subheader(f"📸 Uploaded Files ({len(uploaded_files)})")
-    
-    processed_images = []
-    
-    # Progress feedback
-    with st.spinner("⚡ Running high-speed parallel OCR detection..."):
-        # Executing multi-threaded extraction
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(process_single_image, file, pattern_type) for file in uploaded_files]
-            processed_images = [future.result() for future in futures]
-            
-    st.toast("🎉 Fast scan completed!", icon="🚀")
-    
+    # Trigger processing only if the session state is empty (prevents re-running OCR on text input)
+    if not st.session_state["processed_data"]:
+        with st.spinner("⚡ Running high-speed OCR on all files..."):
+            for file in uploaded_files:
+                res = process_single_image(file, pattern_type)
+                if res:
+                    st.session_state["processed_data"].append(res)
+            st.toast("🎉 Scan completed successfully!", icon="🚀")
+
     # --- Interactive Preview & Editing Grid ---
     st.markdown("### 👁️ Review & Edit Suggested Names")
-    st.write("You can instantly overwrite or tweak any name in the input boxes below before final download.")
+    st.write("You can instantly overwrite or tweak any name in the input boxes below.")
     
     final_files_to_zip = {}
     
-    # Display in a clean 2-column grid layout
     cols = st.columns(2)
-    for i, item in enumerate(processed_images):
+    for i, item in enumerate(st.session_state["processed_data"]):
         col = cols[i % 2]
         with col:
             st.markdown('<div class="preview-card">', unsafe_allow_html=True)
@@ -160,13 +169,16 @@ if uploaded_files:
                 st.markdown(f"**Original:** `{item['original_name']}`")
                 st.markdown(f"<small>{item['status']}</small>", unsafe_allow_html=True)
                 
+                # Use session state to capture and lock input changes safely
+                input_key = f"input_{item['original_name']}_{i}"
                 user_edited_name = st.text_input(
                     f"Final Name for Image #{i+1}", 
-                    value=item["suggested_name"],
-                    key=f"input_{i}"
+                    value=st.session_state["user_edits"].get(input_key, item["suggested_name"]),
+                    key=input_key
                 )
+                st.session_state["user_edits"][input_key] = user_edited_name
                 
-                # Prevent duplicate file names inside ZIP
+                # Prevent duplicates
                 final_name = f"{user_edited_name}{item['extension']}"
                 if final_name in final_files_to_zip:
                     final_name = f"{user_edited_name}_{i}{item['extension']}"
@@ -182,17 +194,24 @@ if uploaded_files:
     if st.button("🚀 Generate Renamed ZIP File"):
         zip_path = "renamed_images_package.zip"
         
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for filename, file_bytes in final_files_to_zip.items():
-                zipf.writestr(filename, file_bytes)
-                
-        st.balloons()
-        
-        with open(zip_path, "rb") as f:
-            st.download_button(
-                label="📥 Click Here to Download Your ZIP File",
-                data=f,
-                file_name="renamed_site_images.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
+        try:
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for filename, file_bytes in final_files_to_zip.items():
+                    zipf.writestr(filename, file_bytes)
+                    
+            st.balloons()
+            
+            with open(zip_path, "rb") as f:
+                st.download_button(
+                    label="📥 Click Here to Download Your ZIP File",
+                    data=f,
+                    file_name="renamed_site_images.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+        except Exception as zip_err:
+            st.error(f"Error packaging files into ZIP: {zip_err}")
+else:
+    # Clear history if files are removed
+    st.session_state["processed_data"] = []
+    st.session_state["user_edits"] = {}
