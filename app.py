@@ -8,7 +8,7 @@ import re
 
 # Page Configuration
 st.set_page_config(
-    page_title="Smart Image Renamer Pro",
+    page_title="Image Renamer",
     page_icon="🏷️",
     layout="wide",
     initial_sidebar_state="expanded"
