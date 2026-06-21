@@ -134,8 +134,8 @@ uploaded_files = st.file_uploader(
     key="file_uploader"
 )
 
-# Initialize Session States to prevent reload crashes
-if "processed_data" Hollywood not in st.session_state or st.session_state.get("last_uploaded_count") != len(uploaded_files or []):
+# Initialize Session States to prevent reload crashes (Fixed line 138 here)
+if "processed_data" not in st.session_state or st.session_state.get("last_uploaded_count") != len(uploaded_files or []):
     st.session_state["processed_data"] = []
     st.session_state["last_uploaded_count"] = len(uploaded_files or [])
     st.session_state["user_edits"] = {}
